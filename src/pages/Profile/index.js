@@ -1,6 +1,8 @@
-import React, { useContext, useState } from 'react';
-import { Modal } from 'react-native';
+import React, { useContext, useState, useEffect } from 'react';
+import { Modal, Platform } from 'react-native';
 import firestore from '@react-native-firebase/firestore';
+import storage from '@react-native-firebase/storage';
+import ImagePicker from 'react-native-image-picker';
 import { AuthContext } from '../../contexts/auth';
 import Header from '../../components/Header';
 import Feather from 'react-native-vector-icons/Feather';
@@ -24,6 +26,19 @@ export default function Profile() {
   const [url, setUrl] = useState(null);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(user?.name);
+
+  useEffect(() => {
+    async function loadAvatar() {
+      try {
+        let res = await storage().ref('users').child(user?.uai).getDownloadURL();
+        setUrl(res);
+      } catch (error) {
+        console.log('ERROR, Nehuma foto foi encontrada.');
+      }
+    }
+
+    loadAvatar();
+  }, []);
 
   // Atualizar perfil
   async function updateProfile() {
@@ -57,6 +72,56 @@ export default function Profile() {
     setOpen(false);
   }
 
+  const uploadFile = () => {
+    const options = {
+      noData: true,
+      mediaType: 'photo',
+    };
+
+    ImagePicker.launchImageLibrary(options, res => {
+      if (res.didCancel) {
+        console.log('Cancelou o modal.');
+      } else if (res.error) {
+        console.log('Parece que deu algum erro: ' + res.error);
+      } else {
+        uploadFileFirebase(res).then(() => {
+          uploadAvatarPosts();
+        })
+        setUrl(res.uri);
+      }
+    })
+  }
+
+  const getFileLocalPath = res => {
+    const { path, uri } = res;
+    return Platform.Os === 'android' ? path : uri;
+  }
+
+  const uploadFileFirebase = async res => {
+    const fileSource = getFileLocalPath(res);
+    const sotorageRef = storage().ref('users').child(user?.uid);
+    return await sotorageRef.putFile(fileSource)
+  };
+
+  async function uploadAvatarPosts() {
+    const sotorageRef = storage().ref('users').child(user?.uid);
+    const url = await sotorageRef.getDownloadURL()
+      .then(async image => {
+        //Atualizar todos AvatarUrl dos posts desse user
+        const postsDocs = await firestore().collection('posts')
+          .where('userId', '==', user.uid).get();
+
+        postsDocs.forEach(async doc => {
+          await firestore().collection('posts').doc(doc.id).update({
+            avatarUrl: image
+          })
+        })
+
+      }).catch((error) => {
+        console.log(error);
+      })
+  }
+
   return (
     <Container>
       <Header />
@@ -65,7 +130,7 @@ export default function Profile() {
         url ?
           (
             <UploadButton
-              onPress={() => { }}
+              onPress={uploadFile}
             >
               <UploadText>+</UploadText>
               <Avatar
@@ -75,7 +140,7 @@ export default function Profile() {
           ) :
           (
             <UploadButton
-              onPress={() => { }}
+              onPress={uploadFile}
             >
               <UploadText>+</UploadText>
             </UploadButton>
@@ -104,7 +169,7 @@ export default function Profile() {
         animationType='slide'
         transparent={true}
       >
-        <ModalContainer>
+        <ModalContainer behavior={Platform.OS === 'android' ? '' : 'padding'}>
           <ButtonBack
             onPress={() => setOpen(false)}
           >
